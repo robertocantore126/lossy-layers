@@ -22,6 +22,12 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 
+/* Any author rule that sets `display` outranks the browser's own
+   `[hidden] { display: none }`, so hiding an element with the attribute
+   silently stops working the moment it also matches a layout rule. Restate
+   it with enough weight to win. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--ground);
