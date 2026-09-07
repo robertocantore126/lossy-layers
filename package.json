@@ -1,0 +1,18 @@
+{
+  "name": "lossy-layers",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A layered image editor with a live JPEG-compression preview.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/make-artifact.mjs",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}
