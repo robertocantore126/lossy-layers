@@ -165,6 +165,18 @@ export class Store {
     this.emit();
   }
 
+  /** Drop a layer at an absolute position in the stack, for drag reordering. */
+  moveLayerTo(id: number, index: number): boolean {
+    const from = this.doc.layers.findIndex((l) => l.id === id);
+    if (from < 0) return false;
+    const to = Math.max(0, Math.min(this.doc.layers.length - 1, Math.round(index)));
+    if (from === to) return false;
+    const [moved] = this.doc.layers.splice(from, 1);
+    this.doc.layers.splice(to, 0, moved!);
+    this.emit();
+    return true;
+  }
+
   mergeDown(): void {
     const i = this.activeIndex();
     if (i < 1) return;

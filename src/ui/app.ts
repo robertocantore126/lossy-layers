@@ -100,7 +100,6 @@ export class App {
     else if (phase === 'move') this.tool.onPointerMove(p, ctx);
     else {
       this.tool.onPointerUp(p, ctx);
-      this.layerPanel.render();
     }
   }
 
@@ -183,7 +182,6 @@ export class App {
     if (!files.length) return;
     const result = await acceptFiles(this.store, files, () => this.history.push());
     if (result.projectLoaded) this.history.clear();
-    this.layerPanel.render();
     this.buildToolOptions();
     this.refresh(false);
 
@@ -259,14 +257,12 @@ export class App {
     this.historyButtons['undo'] = this.barButton('Undo', () => {
       this.filterPanel.revert();
       this.history.undo();
-      this.layerPanel.render();
       this.buildToolOptions();
       this.refresh(false);
     }, 'btn ghost');
     this.historyButtons['redo'] = this.barButton('Redo', () => {
       this.filterPanel.revert();
       this.history.redo();
-      this.layerPanel.render();
       this.buildToolOptions();
       this.refresh(false);
     }, 'btn ghost');
@@ -432,14 +428,12 @@ export class App {
           e.preventDefault();
           this.filterPanel.revert();
           if (e.shiftKey) this.history.redo(); else this.history.undo();
-          this.layerPanel.render();
           this.buildToolOptions();
           this.refresh(false);
         } else if (k === 'y') {
           e.preventDefault();
           this.filterPanel.revert();
           this.history.redo();
-          this.layerPanel.render();
           this.buildToolOptions();
           this.refresh(false);
         }
@@ -472,7 +466,6 @@ export class App {
       openProject: async (text: string): Promise<void> => {
         this.store.load(await deserialize(text));
         this.history.clear();
-        this.layerPanel.render();
         this.buildToolOptions();
         this.refresh(false);
       },

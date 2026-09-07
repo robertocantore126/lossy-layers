@@ -18,12 +18,30 @@ const ICONS = {
   remove: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>',
 };
 
-/** The layer stack: ordering, visibility, opacity and blend. */
+/** Below this the gesture is a click, above it a reorder drag. */
+const DRAG_THRESHOLD = 4;
+
+interface DragState {
+  id: number;
+  startY: number;
+  moved: boolean;
+  /** History is recorded once, on the first actual move. */
+  pushed: boolean;
+}
+
+/**
+ * The layer stack: ordering, visibility, opacity and blend.
+ *
+ * The panel re-renders from a store subscription rather than from each
+ * handler, so every mutation shows up whether it came from a button here, a
+ * drag, a tool, undo, or a project load.
+ */
 export class LayerPanel {
   readonly root: HTMLElement;
   private list: HTMLElement;
   private props: HTMLElement;
   private buttons: Record<string, HTMLButtonElement> = {};
+  private drag: DragState | null = null;
 
   constructor(
     private store: Store,
@@ -33,36 +51,18 @@ export class LayerPanel {
     const head = el('div', 'panel-head');
     head.appendChild(el('span', 'sign', 'Layers'));
 
-    this.buttons['add'] = iconButton('ly-add', 'New empty layer', ICONS.add, () => {
+    const act = (fn: () => void) => () => {
       this.history.push();
-      this.store.addPaintLayer();
+      fn();
       this.onChange();
-    });
-    this.buttons['duplicate'] = iconButton('ly-dup', 'Duplicate layer', ICONS.duplicate, () => {
-      this.history.push();
-      this.store.duplicateActive();
-      this.onChange();
-    });
-    this.buttons['up'] = iconButton('ly-up', 'Move up', ICONS.up, () => {
-      this.history.push();
-      this.store.moveActive(1);
-      this.onChange();
-    });
-    this.buttons['down'] = iconButton('ly-down', 'Move down', ICONS.down, () => {
-      this.history.push();
-      this.store.moveActive(-1);
-      this.onChange();
-    });
-    this.buttons['merge'] = iconButton('ly-merge', 'Merge down', ICONS.merge, () => {
-      this.history.push();
-      this.store.mergeDown();
-      this.onChange();
-    });
-    this.buttons['remove'] = iconButton('ly-del', 'Delete layer', ICONS.remove, () => {
-      this.history.push();
-      this.store.deleteActive();
-      this.onChange();
-    });
+    };
+
+    this.buttons['add'] = iconButton('ly-add', 'New empty layer', ICONS.add, act(() => this.store.addPaintLayer()));
+    this.buttons['duplicate'] = iconButton('ly-dup', 'Duplicate layer', ICONS.duplicate, act(() => this.store.duplicateActive()));
+    this.buttons['up'] = iconButton('ly-up', 'Move up', ICONS.up, act(() => this.store.moveActive(1)));
+    this.buttons['down'] = iconButton('ly-down', 'Move down', ICONS.down, act(() => this.store.moveActive(-1)));
+    this.buttons['merge'] = iconButton('ly-merge', 'Merge down', ICONS.merge, act(() => this.store.mergeDown()));
+    this.buttons['remove'] = iconButton('ly-del', 'Delete layer', ICONS.remove, act(() => this.store.deleteActive()));
 
     head.append(
       this.buttons['add']!, this.buttons['duplicate']!, this.buttons['up']!,
@@ -70,10 +70,15 @@ export class LayerPanel {
     );
 
     this.list = el('div', 'layer-list');
+    this.list.setAttribute('role', 'listbox');
+    this.list.setAttribute('aria-label', 'Layers');
     this.props = el('div', 'block');
 
     this.root = el('div', 'layer-panel');
     this.root.append(head, this.list, this.props);
+
+    // One subscription replaces a render call in every handler.
+    this.store.subscribe(() => this.render());
   }
 
   private thumbnail(l: Layer): string {
@@ -100,51 +105,145 @@ export class LayerPanel {
 
     // Top of the stack reads first, the way every layer panel does it.
     for (let i = layers.length - 1; i >= 0; i--) {
-      const l = layers[i]!;
-      const rowEl = el('div', 'layer');
-      rowEl.setAttribute('aria-selected', l.id === this.store.doc.activeId ? 'true' : 'false');
-      rowEl.dataset['hidden'] = l.visible ? 'false' : 'true';
-
-      const eye = el('button', 'eye');
-      eye.type = 'button';
-      eye.title = l.visible ? 'Hide layer' : 'Show layer';
-      eye.setAttribute('aria-label', eye.title);
-      eye.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">${l.visible ? EYE_ON : EYE_OFF}</svg>`;
-      eye.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        this.history.push();
-        l.visible = !l.visible;
-        this.store.emit();
-        this.onChange();
-      });
-
-      const thumb = el('img', 'thumb');
-      thumb.src = this.thumbnail(l);
-      thumb.alt = '';
-
-      const meta = el('div', 'layer-meta');
-      meta.appendChild(el('span', 'layer-name', l.name));
-      const bits = [BLEND_LABELS[l.blend]];
-      if (l.opacity < 1) bits.push(`${Math.round(l.opacity * 100)}%`);
-      if (l.scale !== 1) bits.push(`${Math.round(l.scale * 100)}% scale`);
-      meta.appendChild(el('span', 'layer-sub', bits.join(' · ')));
-
-      rowEl.append(eye, thumb, meta);
-      rowEl.addEventListener('click', () => {
-        this.store.select(l.id);
-        this.onChange();
-      });
-      this.list.appendChild(rowEl);
+      this.list.appendChild(this.buildRow(layers[i]!));
     }
 
     this.renderProps();
     this.syncButtons();
   }
 
+  private buildRow(l: Layer): HTMLElement {
+    const rowEl = el('div', 'layer');
+    rowEl.dataset['layerId'] = String(l.id);
+    rowEl.setAttribute('role', 'option');
+    rowEl.tabIndex = 0;
+    const selected = l.id === this.store.doc.activeId;
+    rowEl.setAttribute('aria-selected', selected ? 'true' : 'false');
+    rowEl.dataset['hidden'] = l.visible ? 'false' : 'true';
+    if (this.drag?.id === l.id && this.drag.moved) rowEl.classList.add('dragging');
+
+    const eye = el('button', 'eye');
+    eye.type = 'button';
+    eye.title = l.visible ? 'Hide layer' : 'Show layer';
+    eye.setAttribute('aria-label', eye.title);
+    eye.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">${l.visible ? EYE_ON : EYE_OFF}</svg>`;
+    eye.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      this.history.push();
+      l.visible = !l.visible;
+      this.store.emit();
+      this.onChange();
+    });
+
+    const thumb = el('img', 'thumb');
+    thumb.src = this.thumbnail(l);
+    thumb.alt = '';
+    thumb.draggable = false;
+
+    const meta = el('div', 'layer-meta');
+    meta.appendChild(el('span', 'layer-name', l.name));
+    const bits = [BLEND_LABELS[l.blend]];
+    if (l.opacity < 1) bits.push(`${Math.round(l.opacity * 100)}%`);
+    if (l.scale !== 1) bits.push(`${Math.round(l.scale * 100)}% scale`);
+    meta.appendChild(el('span', 'layer-sub', bits.join(' · ')));
+
+    rowEl.append(eye, thumb, meta);
+
+    rowEl.addEventListener('pointerdown', (ev) => {
+      if ((ev.target as HTMLElement).closest('.eye')) return;
+      if (ev.button !== 0) return;
+      this.beginDrag(l.id, ev.clientY);
+    });
+    rowEl.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        this.store.select(l.id);
+        this.onChange();
+      }
+    });
+
+    return rowEl;
+  }
+
+  // ------------------------------------------------------------ reordering
+
+  /**
+   * Drag tracking lives on the window, not the row, because reordering
+   * re-renders the list and destroys the element the gesture started on.
+   */
+  private beginDrag(id: number, startY: number): void {
+    this.drag = { id, startY, moved: false, pushed: false };
+
+    const move = (ev: PointerEvent): void => this.dragMove(ev);
+    const up = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      this.endDrag();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
+  private dragMove(ev: PointerEvent): void {
+    const d = this.drag;
+    if (!d) return;
+    if (!d.moved && Math.abs(ev.clientY - d.startY) < DRAG_THRESHOLD) return;
+
+    if (!d.moved) {
+      d.moved = true;
+      this.list.classList.add('reordering');
+    }
+    const target = this.dropIndex(ev.clientY);
+    if (target === null) return;
+
+    const from = this.store.layers.findIndex((l) => l.id === d.id);
+    if (from === target) return;
+
+    if (!d.pushed) {
+      this.history.push();
+      d.pushed = true;
+    }
+    if (this.store.moveLayerTo(d.id, target)) this.onChange();
+  }
+
+  /** Model index the dragged layer would land on, given a pointer position. */
+  private dropIndex(clientY: number): number | null {
+    const rows = Array.from(this.list.querySelectorAll<HTMLElement>('.layer'));
+    if (!rows.length) return null;
+    const n = this.store.layers.length;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]!.getBoundingClientRect();
+      // Rows read top-first, so DOM position i is model index n-1-i.
+      if (clientY < r.top + r.height / 2) return n - 1 - i;
+    }
+    return 0;
+  }
+
+  private endDrag(): void {
+    const d = this.drag;
+    this.drag = null;
+    this.list.classList.remove('reordering');
+    if (!d) return;
+    if (d.moved) {
+      this.render();
+      this.onChange();
+    } else {
+      this.store.select(d.id);
+      this.onChange();
+    }
+  }
+
+  // ----------------------------------------------------------------- props
+
   private renderProps(): void {
     this.props.textContent = '';
     const l = this.store.activeLayer();
     if (!l) return;
+
+    // Captured before any drag, so the commit can record the pre-drag value.
+    const opacityBefore = l.opacity;
 
     this.props.appendChild(sign('Selected layer'));
     this.props.appendChild(
@@ -154,6 +253,18 @@ export class LayerPanel {
           const cur = this.store.activeLayer();
           if (!cur) return;
           cur.opacity = n / 100;
+          this.onChange();
+        },
+        onCommit: (n) => {
+          const cur = this.store.activeLayer();
+          if (!cur) return;
+          const applied = n / 100;
+          if (applied === opacityBefore) return;
+          // Snapshot the value the drag started from, then re-apply.
+          cur.opacity = opacityBefore;
+          this.history.push();
+          cur.opacity = applied;
+          this.store.emit();
           this.onChange();
         },
       }),
@@ -168,7 +279,6 @@ export class LayerPanel {
           if (!cur) return;
           this.history.push();
           this.store.setBlend(cur, v);
-          this.render();
           this.onChange();
         },
       ),

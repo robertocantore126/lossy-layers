@@ -249,9 +249,19 @@ select {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 7px;
   background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius);
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 .layer:hover { background: var(--raised-hi); }
+.layer.dragging {
+  cursor: grabbing;
+  border-color: var(--accent);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .45);
+}
+/* While a row is being dragged the others should read as targets, not buttons. */
+.layer-list.reordering .layer { cursor: grabbing; }
+.layer-list.reordering .layer:not(.dragging):hover { background: var(--raised); }
 .layer[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .layer[data-hidden="true"] .thumb,
 .layer[data-hidden="true"] .layer-name { opacity: .35; }
