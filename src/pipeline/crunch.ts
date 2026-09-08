@@ -1,8 +1,12 @@
 import { copyCanvas, ctx2d, newCanvas } from '../core/canvas';
+import { defaultsOf, type ParamValues } from '../core/types';
+import { getCodec, type Codec } from './codecs';
 
 export interface CrunchSettings {
-  /** 1..100, the JPEG quality handed to the encoder. */
-  quality: number;
+  /** Which compression method runs. See `pipeline/codecs`. */
+  codecId: string;
+  /** Kept per codec, so switching back and forth remembers your settings. */
+  codecParams: Record<string, ParamValues>;
   /** How many times to re-encode. Each pass eats the previous one's artifacts. */
   passes: number;
   /** Longest side before encoding; 0 keeps the document size. */
@@ -14,7 +18,8 @@ export interface CrunchSettings {
 
 export function defaultCrunch(): CrunchSettings {
   return {
-    quality: 24,
+    codecId: 'jpeg',
+    codecParams: {},
     passes: 1,
     maxDimension: 0,
     squishX: 1,
@@ -23,15 +28,30 @@ export function defaultCrunch(): CrunchSettings {
   };
 }
 
+/** The parameter values for a codec, filling in defaults on first use. */
+export function paramsFor(settings: CrunchSettings, codec: Codec): ParamValues {
+  let values = settings.codecParams[codec.id];
+  if (!values) {
+    values = defaultsOf(codec.params);
+    settings.codecParams[codec.id] = values;
+  }
+  return values;
+}
+
 export interface CrunchResult {
   canvas: HTMLCanvasElement;
+  /** A saveable file, for export. */
   blob: Blob | null;
+  /** What the method actually costs, which is not always the file's size. */
+  bytes: number;
   passes: number;
   elapsedMs: number;
 }
 
-/** Geometry applied before the encoder sees anything. Pure scaling, so a
- *  point on the output maps back to the document by dividing it out. */
+/**
+ * Geometry applied before the codec sees anything. Pure scaling, so a point
+ * on the output maps back to the document by dividing it out.
+ */
 export function crunchGeometry(w: number, h: number, s: CrunchSettings): { w: number; h: number } {
   let ow = w;
   let oh = h;
@@ -65,37 +85,11 @@ function buildStage(source: HTMLCanvasElement, s: CrunchSettings): HTMLCanvasEle
 export type Cancelled = () => boolean;
 
 /**
- * Decode a data URL into the bytes it stands for.
+ * Run the selected compression method over the image, `passes` times.
  *
- * We encode with `toDataURL` rather than `toBlob` on purpose. The encoders
- * produce identical JPEG bytes, but `toBlob` and `OffscreenCanvas
- * .convertToBlob` deliver their result through a scheduled callback that some
- * embedders throttle to roughly one per second. Measured on this pipeline:
- * 2 ms synchronous versus 1005 ms through the callback, which at thirty
- * passes is the difference between instant and half a minute. Decoding is
- * never throttled, so only the encode side has to avoid the callback.
- */
-function dataUrlToBlob(url: string): Blob {
-  const comma = url.indexOf(',');
-  if (comma < 0) throw new Error('malformed data URL from the canvas encoder');
-  const mime = /:(.*?);/.exec(url.slice(0, comma))?.[1] ?? 'image/jpeg';
-  const binary = atob(url.slice(comma + 1));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
-}
-
-/** One JPEG round trip: encode the canvas, hand back the exact bytes. */
-export function encodeJpeg(canvas: HTMLCanvasElement, quality: number): Blob {
-  return dataUrlToBlob(canvas.toDataURL('image/jpeg', quality));
-}
-
-/**
- * Re-encode `source` as JPEG, `passes` times, decoding between each one.
- *
- * This is the whole point of the app: a single pass is ordinary compression,
- * and repeated passes are generation loss, where each encode is fed the
- * previous encode's own artifacts.
+ * A single pass is ordinary compression. Repeated passes are generation loss,
+ * where each round is handed the previous round's own artifacts to compress
+ * again, which is where the look comes from.
  */
 export async function crunch(
   source: HTMLCanvasElement,
@@ -104,21 +98,24 @@ export async function crunch(
   cancelled: Cancelled = () => false,
 ): Promise<CrunchResult> {
   const t0 = performance.now();
-  const work = copyCanvas(buildStage(source, settings));
-  const wctx = ctx2d(work);
-  const q = settings.quality / 100;
+  const codec = getCodec(settings.codecId) ?? getCodec('jpeg');
+  let work = copyCanvas(buildStage(source, settings));
   let last: Blob | null = null;
+  let bytes = 0;
+
+  if (!codec) return { canvas: work, blob: null, bytes: 0, passes: 0, elapsedMs: 0 };
+  const values = paramsFor(settings, codec);
 
   for (let i = 0; i < passes; i++) {
     if (cancelled()) break;
-    const blob = encodeJpeg(work, q);
-    last = blob;
+    const pass = await codec.run(work, values);
     if (cancelled()) break;
-    const bmp = await createImageBitmap(blob);
-    wctx.clearRect(0, 0, work.width, work.height);
-    wctx.drawImage(bmp, 0, 0);
-    bmp.close();
+    if (pass.blob.size > 0) {
+      last = pass.blob;
+      bytes = pass.reportedBytes ?? pass.blob.size;
+    }
+    work = pass.canvas;
   }
 
-  return { canvas: work, blob: last, passes, elapsedMs: performance.now() - t0 };
+  return { canvas: work, blob: last, bytes, passes, elapsedMs: performance.now() - t0 };
 }

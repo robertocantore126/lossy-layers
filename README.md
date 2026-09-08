@@ -92,6 +92,38 @@ const invert: Filter = {
 A filter takes a canvas and returns a canvas. It never sees the layer stack,
 the store or the DOM.
 
+### Adding a compression method
+
+`src/pipeline/codecs.ts` holds the `Codec` interface and its registry;
+`builtinCodecs.ts` holds the four that ship. A codec's `run` is one pass:
+degrade the pixels the way the method does, and report what it costs. Feeding
+its own output back in is what produces generation loss, so a codec has to be
+able to consume what it produces.
+
+Two rules keep the byte counts honest, and both exist because of a real trap:
+
+- **Never trust a requested MIME type.** A canvas asked for a format it cannot
+  encode returns a PNG without complaint, which would show up as a method that
+  mysteriously never damages anything. `encodeAs` checks the returned type and
+  gives back `null` instead, and `canEncode` probes once so unsupported
+  formats are never offered. On this browser JPEG and WebP encode; AVIF, JPEG
+  XL and HEIC all silently fall back.
+- **Report the method, not the wrapper.** Set `reportedBytes` when the
+  saveable file misrepresents the cost. Indexed colour needs it: the canvas
+  PNG encoder always writes truecolour, so a 16-colour image comes back the
+  size of the original. `indexedPayloadSize` packs the indices at their real
+  bit depth with PNG's row padding and filter bytes, deflates them through
+  `CompressionStream`, and adds the palette.
+
+### The four that ship
+
+| Method | What it does to the image |
+| --- | --- |
+| JPEG | Eight-pixel blocks, ringing at hard edges, colour smeared across them |
+| WebP | Smears instead of blocking; flat waxy patches, fine texture gone |
+| Indexed colour | Median-cut palette taken from the image, with optional dithering |
+| Chroma crush | Keeps luma at full resolution and guts the colour difference channels |
+
 ## Layer masks
 
 A mask is an alpha channel the same size as its layer, held on `Layer.mask`.

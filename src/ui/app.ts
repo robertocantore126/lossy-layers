@@ -9,7 +9,9 @@ import { allFilters } from '../filters/registry';
 import { acceptFiles, IMAGE_TYPES } from '../io/files';
 import { deserialize, PROJECT_EXTENSION, projectBlob, serialize } from '../io/project';
 import { saveFile } from '../io/save';
-import { crunch, defaultCrunch, type CrunchSettings } from '../pipeline/crunch';
+import { registerBuiltinCodecs } from '../pipeline/builtinCodecs';
+import { allCodecs, getCodec } from '../pipeline/codecs';
+import { crunch, defaultCrunch, paramsFor, type CrunchSettings } from '../pipeline/crunch';
 import { registerTool, allTools, getTool, toolForShortcut } from '../tools/registry';
 import { brushTool, eraserTool } from '../tools/paint';
 import { moveTool } from '../tools/move';
@@ -52,6 +54,7 @@ export class App {
 
   constructor(private mount: HTMLElement) {
     registerBuiltinFilters();
+    registerBuiltinCodecs();
     registerTool(moveTool);
     registerTool(brushTool);
     registerTool(eraserTool);
@@ -172,8 +175,8 @@ export class App {
       .then((result) => {
         if (seq !== this.renderSeq) return;
         this.viewport.showCompressed(result.canvas);
-        if (result.blob) this.stats['size']!.textContent = formatBytes(result.blob.size);
-        this.stats['quality']!.textContent = String(this.crunchSettings.quality);
+        if (result.bytes) this.stats['size']!.textContent = formatBytes(result.bytes);
+        this.stats['method']!.textContent = getCodec(this.crunchSettings.codecId)?.label ?? '—';
         this.stats['passes']!.textContent = passes + (fast ? ' (drag)' : '');
         this.stats['time']!.textContent = `${Math.round(result.elapsedMs)} ms`;
       })
@@ -224,14 +227,28 @@ export class App {
       this.status('The encoder returned nothing.');
       return;
     }
-    const suffix = this.crunchSettings.passes > 1 ? `_x${this.crunchSettings.passes}` : '';
-    const outcome = await saveFile(result.blob, `lossy_q${this.crunchSettings.quality}${suffix}.jpg`);
+    const outcome = await saveFile(result.blob, this.exportName(result.blob.type));
     btn.textContent = label;
     this.status(
       outcome === 'saved' ? `Saved ${formatBytes(result.blob.size)}.`
         : outcome === 'declined' ? 'Save cancelled.'
           : 'Saving is not available here.',
     );
+  }
+
+  /** Name the file after the method and whatever its leading control is. */
+  private exportName(mime: string): string {
+    const s = this.crunchSettings;
+    const codec = getCodec(s.codecId);
+    const ext = mime === 'image/webp' ? 'webp' : mime === 'image/png' ? 'png' : 'jpg';
+    const bits = [codec?.id ?? 'lossy'];
+    if (codec) {
+      const values = paramsFor(s, codec);
+      const lead = codec.params.find((p) => p.kind === 'range');
+      if (lead) bits.push(`${lead.key}${String(values[lead.key] ?? '')}`);
+    }
+    if (s.passes > 1) bits.push(`x${s.passes}`);
+    return `${bits.join('_')}.${ext}`;
   }
 
   private async saveProject(btn: HTMLButtonElement): Promise<void> {
@@ -343,7 +360,7 @@ export class App {
 
     const readout = el('div', 'readout');
     for (const [key, label] of [
-      ['size', 'Encoded size'], ['quality', 'Quality'], ['passes', 'Passes'],
+      ['size', 'Encoded size'], ['method', 'Method'], ['passes', 'Passes'],
       ['layers', 'Layers'], ['time', 'Encode time'],
     ] as const) {
       const stat = el('div', key === 'size' ? 'stat hero' : 'stat');
@@ -483,6 +500,7 @@ export class App {
       getTool,
       filters: allFilters(),
       crunchSettings: this.crunchSettings,
+      codecs: allCodecs(),
       serialize: () => serialize(this.store.doc),
       openProject: async (text: string): Promise<void> => {
         this.store.load(await deserialize(text));

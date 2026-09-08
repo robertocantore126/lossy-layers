@@ -1,5 +1,7 @@
-import type { CrunchSettings } from '../pipeline/crunch';
-import { button, checkbox, chipRow, el, hint, sign, slider } from './controls';
+import type { ParamSpec } from '../core/types';
+import { allCodecs, getCodec } from '../pipeline/codecs';
+import { paramsFor, type CrunchSettings } from '../pipeline/crunch';
+import { button, checkbox, chipRow, el, hint, selectField, sign, slider } from './controls';
 
 const BORDER_CHANNELS = [0, 128, 255];
 
@@ -22,13 +24,29 @@ export class CrunchPanel {
     this.root.textContent = '';
     this.root.appendChild(sign('The crunch'));
 
+    const codecs = allCodecs();
+    const codec = getCodec(s.codecId) ?? codecs[0]!;
+
     this.root.appendChild(
-      slider({
-        label: 'Quality', min: 1, max: 100, value: s.quality,
-        onInput: (n) => { s.quality = n; this.onChange(true); },
-        onCommit: () => this.onChange(false),
-      }),
+      selectField(
+        'Method',
+        codecs.map((c) => ({ value: c.id, label: c.label })),
+        codec.id,
+        (id) => {
+          s.codecId = id;
+          this.render();
+          this.onChange(false);
+        },
+      ),
     );
+    this.root.appendChild(hint(codec.character));
+
+    // Each codec declares its own controls, so adding one needs nothing here.
+    const values = paramsFor(s, codec);
+    for (const spec of codec.params) {
+      this.root.appendChild(this.control(spec, () => values));
+    }
+
     this.root.appendChild(
       slider({
         label: 'Passes', min: 1, max: 30, value: s.passes, unit: '×',
@@ -37,13 +55,14 @@ export class CrunchPanel {
       }),
     );
     this.root.appendChild(
-      hint("Each pass re-encodes the last one's artifacts. Past about twenty the image settles, so drop the quality instead of adding passes."),
+      hint("Each pass re-encodes the last one's artifacts. Past about twenty the image settles, so weaken the method instead of adding passes."),
     );
 
     const quick = el('div', 'chips');
     quick.append(
       button('Random 15–30', () => {
-        s.quality = Math.floor(Math.random() * 16) + 15;
+        const v = paramsFor(s, codec);
+        if ('quality' in v) v['quality'] = Math.floor(Math.random() * 16) + 15;
         s.passes = 1;
         this.render();
         this.onChange(false);
@@ -125,6 +144,48 @@ export class CrunchPanel {
       const field = el('div', 'field');
       field.append(el('span', 'sign', 'Frame colour'), swatches);
       this.root.appendChild(field);
+    }
+  }
+
+  private control(spec: ParamSpec, values: () => Record<string, number | boolean | string>): HTMLElement {
+    switch (spec.kind) {
+      case 'range':
+        return slider({
+          label: spec.label,
+          min: spec.min,
+          max: spec.max,
+          step: spec.step ?? 1,
+          value: Number(values()[spec.key] ?? spec.default),
+          unit: spec.unit ?? '',
+          onInput: (n) => { values()[spec.key] = n; this.onChange(true); },
+          onCommit: () => this.onChange(false),
+        });
+      case 'toggle':
+        return checkbox(spec.label, Boolean(values()[spec.key] ?? spec.default), (v) => {
+          values()[spec.key] = v;
+          this.onChange(false);
+        });
+      case 'color': {
+        const wrap = el('div', 'field');
+        wrap.appendChild(el('span', 'sign', spec.label));
+        const input = el('input');
+        input.type = 'color';
+        input.className = 'colorpick';
+        input.value = String(values()[spec.key] ?? spec.default);
+        input.addEventListener('input', () => {
+          values()[spec.key] = input.value;
+          this.onChange(false);
+        });
+        wrap.appendChild(input);
+        return wrap;
+      }
+      case 'choice':
+        return selectField(
+          spec.label,
+          spec.options,
+          String(values()[spec.key] ?? spec.default),
+          (v) => { values()[spec.key] = v; this.onChange(false); },
+        );
     }
   }
 }
