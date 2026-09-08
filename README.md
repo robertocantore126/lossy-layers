@@ -154,6 +154,21 @@ Tools write to whichever surface is selected. `ToolContext.target` is already
 resolved, so a tool never has to check whether a mask exists, and
 `Store.detachTarget` applies the copy-on-write rule to the right canvas.
 
+## The preview while dragging
+
+`refresh(fast)` runs a cheaper render while the pointer is down. It used to
+force a single pass, which was fine when the only method was JPEG and one
+pass looked much like eight. Once the methods got stronger that became a bug
+in disguise: you judged WebP at one hop while it was set to eight, so the
+method looked weaker than it is, and the image visibly changed the moment you
+let go.
+
+`CrunchSettings.livePreview` now decides, and defaults to `full` — show what
+you will actually get. `adaptive` fits as many passes as a 120 ms budget
+allows, using the measured cost of the last full render. `fast` is the old
+single-pass behaviour, kept for slow machines. The control only appears above
+one pass, where the distinction means something.
+
 ## Two things worth knowing before changing them
 
 **Undo is copy-on-write.** `History.push` snapshots the layer array with the

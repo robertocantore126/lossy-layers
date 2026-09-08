@@ -2,9 +2,20 @@ import { copyCanvas, ctx2d, newCanvas } from '../core/canvas';
 import { defaultsOf, type ParamValues } from '../core/types';
 import { getCodec, type Codec } from './codecs';
 
+/**
+ * How faithful the preview stays while you are dragging.
+ *
+ * `full` always shows the real result, which is what you want when judging a
+ * method. `fast` drops to a single pass, which was the old fixed behaviour
+ * and makes a strong method look weak mid-stroke. `adaptive` fits as many
+ * passes as the frame budget allows.
+ */
+export type LivePreview = 'full' | 'adaptive' | 'fast';
+
 export interface CrunchSettings {
   /** Which compression method runs. See `pipeline/codecs`. */
   codecId: string;
+  livePreview: LivePreview;
   /** Kept per codec, so switching back and forth remembers your settings. */
   codecParams: Record<string, ParamValues>;
   /** How many times to re-encode. Each pass eats the previous one's artifacts. */
@@ -19,6 +30,7 @@ export interface CrunchSettings {
 export function defaultCrunch(): CrunchSettings {
   return {
     codecId: 'jpeg',
+    livePreview: 'full',
     codecParams: {},
     passes: 1,
     maxDimension: 0,

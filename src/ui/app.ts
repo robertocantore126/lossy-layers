@@ -48,6 +48,10 @@ export class App {
   private historyButtons: Record<string, HTMLButtonElement> = {};
   private statusEl = el('p', 'note');
 
+  /** Cost of the last full render, used to budget the drag preview. */
+  private lastFullMs = 0;
+  private lastFullPasses = 0;
+
   private renderSeq = 0;
   private renderBusy = false;
   private renderQueued: false | 'fast' | 'full' = false;
@@ -170,15 +174,20 @@ export class App {
       return;
     }
 
-    const passes = fast ? 1 : this.crunchSettings.passes;
+    const passes = fast ? this.dragPasses() : this.crunchSettings.passes;
     void crunch(composite, this.crunchSettings, passes, () => seq !== this.renderSeq)
       .then((result) => {
         if (seq !== this.renderSeq) return;
         this.viewport.showCompressed(result.canvas);
         if (result.bytes) this.stats['size']!.textContent = formatBytes(result.bytes);
         this.stats['method']!.textContent = getCodec(this.crunchSettings.codecId)?.label ?? '—';
-        this.stats['passes']!.textContent = passes + (fast ? ' (drag)' : '');
+        const reduced = fast && passes < this.crunchSettings.passes;
+        this.stats['passes']!.textContent = passes + (reduced ? ' (preview)' : '');
         this.stats['time']!.textContent = `${Math.round(result.elapsedMs)} ms`;
+        if (!fast && result.passes > 0) {
+          this.lastFullMs = result.elapsedMs;
+          this.lastFullPasses = result.passes;
+        }
       })
       .catch(() => {
         /* a newer render superseded this one */
@@ -187,6 +196,30 @@ export class App {
         this.renderBusy = false;
         this.drainQueue();
       });
+  }
+
+  /**
+   * Passes to run while the pointer is down.
+   *
+   * Showing fewer than the real count makes a strong method look weak exactly
+   * when you are judging it, so the default is to show the truth and only
+   * trim if the user asks for it.
+   */
+  private dragPasses(): number {
+    const want = this.crunchSettings.passes;
+    if (want <= 1) return want;
+    switch (this.crunchSettings.livePreview) {
+      case 'full':
+        return want;
+      case 'fast':
+        return 1;
+      case 'adaptive': {
+        if (this.lastFullPasses <= 0 || this.lastFullMs <= 0) return want;
+        const perPass = this.lastFullMs / this.lastFullPasses;
+        const affordable = Math.floor(120 / Math.max(1, perPass));
+        return Math.max(1, Math.min(want, affordable));
+      }
+    }
   }
 
   private drainQueue(): void {

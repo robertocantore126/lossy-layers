@@ -1,6 +1,6 @@
 import type { ParamSpec } from '../core/types';
 import { allCodecs, getCodec } from '../pipeline/codecs';
-import { paramsFor, type CrunchSettings } from '../pipeline/crunch';
+import { paramsFor, type CrunchSettings, type LivePreview } from '../pipeline/crunch';
 import { button, checkbox, chipRow, el, hint, selectField, sign, slider } from './controls';
 
 const BORDER_CHANNELS = [0, 128, 255];
@@ -26,6 +26,7 @@ export class CrunchPanel {
 
     const codecs = allCodecs();
     const codec = getCodec(s.codecId) ?? codecs[0]!;
+    const multiPass = s.passes > 1;
 
     this.root.appendChild(
       selectField(
@@ -51,12 +52,33 @@ export class CrunchPanel {
       slider({
         label: 'Passes', min: 1, max: 30, value: s.passes, unit: '×',
         onInput: (n) => { s.passes = n; this.onChange(true); },
-        onCommit: () => this.onChange(false),
+        onCommit: (n) => {
+          // The preview-fidelity row only exists above one pass, so crossing
+          // that line has to rebuild the panel or the row never appears.
+          const crossed = (n > 1) !== (multiPass);
+          if (crossed) this.render();
+          this.onChange(false);
+        },
       }),
     );
     this.root.appendChild(
       hint("Each pass re-encodes the last one's artifacts. Past about twenty the image settles, so weaken the method instead of adding passes."),
     );
+
+    if (multiPass) {
+      this.root.appendChild(
+        chipRow<LivePreview>(
+          'While dragging, show',
+          [
+            { label: 'Every pass', value: 'full', title: 'What you will actually get' },
+            { label: 'As many as fit', value: 'adaptive', title: 'Trim passes to keep the preview responsive' },
+            { label: 'One pass', value: 'fast', title: 'Fastest, but a strong method will look weak mid-stroke' },
+          ],
+          (v) => v === s.livePreview,
+          (v) => { s.livePreview = v; this.render(); this.onChange(false); },
+        ),
+      );
+    }
 
     const quick = el('div', 'chips');
     quick.append(
