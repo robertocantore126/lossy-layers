@@ -357,6 +357,8 @@ export class LayerPanel {
       wrap.appendChild(
         row(
           button('Add mask', act(() => {
+            // A mask is sized to its layer, so the layer has to exist first.
+            this.store.materialize(l);
             this.store.addMask(l);
             this.setTarget('mask');
           }), 'chip accent', 'Erase without deleting anything'),

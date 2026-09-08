@@ -145,6 +145,7 @@ export class FilterPanel {
 
     if (!this.original || this.previewLayerId !== layer.id) {
       this.revert();
+      this.store.materialize(layer);
       const keep = document.createElement('canvas');
       keep.width = layer.canvas.width;
       keep.height = layer.canvas.height;

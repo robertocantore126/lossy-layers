@@ -1,8 +1,18 @@
 import type { BlendMode, DocState, EditTarget, Layer, LayerKind } from './types';
 import { copyCanvas, ctx2d, fitScale, newCanvas } from './canvas';
 
-/** Longest side we keep at full fidelity. Anything larger is sampled down on import. */
-export const MAX_DOC = 2400;
+/**
+ * The largest document the editor will create. Well past anything a browser
+ * will composite comfortably, so the dialog warns rather than forbids.
+ */
+export const MAX_DOC = 16384;
+
+/**
+ * Imports larger than this get sampled down. Separate from MAX_DOC because
+ * choosing a big canvas is deliberate, whereas dropping a 100-megapixel photo
+ * into a collage usually is not.
+ */
+export const MAX_IMPORT = 8192;
 
 type Listener = () => void;
 
@@ -91,12 +101,65 @@ export class Store {
     this.nextId = Math.max(this.nextId, usedMax + 1);
   }
 
+  /**
+   * A new paint layer allocates nothing.
+   *
+   * At a 3000 square document a full buffer is 36 MB, so a handful of empty
+   * layers would cost more than the artwork. The canvas is grown to document
+   * size by `materialize` the first time something actually draws on it,
+   * which is also how Photoshop behaves from the user's side: an empty layer
+   * is free.
+   */
   addPaintLayer(): Layer {
-    const l = this.makeLayer(newCanvas(this.doc.width, this.doc.height), `Layer ${this.nextId}`, 'paint');
+    const l = this.makeLayer(newCanvas(1, 1), `Layer ${this.nextId}`, 'paint');
     this.doc.layers.push(l);
     this.doc.activeId = l.id;
     this.emit();
     return l;
+  }
+
+  /**
+   * Grow an unallocated paint layer to document size, preserving anything on
+   * it. Image layers are left alone: their canvas is deliberately their own
+   * natural size, which is what keeps a collage of small elements cheap.
+   */
+  materialize(layer: Layer): void {
+    if (layer.kind !== 'paint') return;
+    if (layer.canvas.width >= this.doc.width && layer.canvas.height >= this.doc.height) return;
+    const grown = newCanvas(this.doc.width, this.doc.height);
+    ctx2d(grown).drawImage(layer.canvas, 0, 0);
+    layer.canvas = grown;
+    if (layer.mask) {
+      const mask = newCanvas(this.doc.width, this.doc.height);
+      const mc = ctx2d(mask);
+      mc.fillStyle = '#ffffff';
+      mc.fillRect(0, 0, mask.width, mask.height);
+      mc.globalCompositeOperation = 'copy';
+      mc.drawImage(layer.mask, 0, 0);
+      layer.mask = mask;
+    }
+  }
+
+  /** Start a fresh document, discarding everything currently open. */
+  newDocument(width: number, height: number, matte: string, fill: string | null): void {
+    this.doc = {
+      width: Math.max(1, Math.min(MAX_DOC, Math.round(width))),
+      height: Math.max(1, Math.min(MAX_DOC, Math.round(height))),
+      matte,
+      layers: [],
+      activeId: null,
+    };
+    const bg = this.makeLayer(newCanvas(1, 1), 'Background', 'paint');
+    this.doc.layers.push(bg);
+    this.doc.activeId = bg.id;
+    if (fill) {
+      // A filled background has real pixels, so it has to exist for real.
+      this.materialize(bg);
+      const c = ctx2d(bg.canvas);
+      c.fillStyle = fill;
+      c.fillRect(0, 0, bg.canvas.width, bg.canvas.height);
+    }
+    this.emit();
   }
 
   /**
@@ -107,8 +170,8 @@ export class Store {
     if (this.doc.layers.length === 0) {
       let dw = natW;
       let dh = natH;
-      if (Math.max(dw, dh) > MAX_DOC) {
-        const r = MAX_DOC / Math.max(dw, dh);
+      if (Math.max(dw, dh) > MAX_IMPORT) {
+        const r = MAX_IMPORT / Math.max(dw, dh);
         dw = Math.round(dw * r);
         dh = Math.round(dh * r);
       }
@@ -118,8 +181,8 @@ export class Store {
 
     let cw = natW;
     let ch = natH;
-    if (Math.max(cw, ch) > MAX_DOC) {
-      const r = MAX_DOC / Math.max(cw, ch);
+    if (Math.max(cw, ch) > MAX_IMPORT) {
+      const r = MAX_IMPORT / Math.max(cw, ch);
       cw = Math.round(cw * r);
       ch = Math.round(ch * r);
     }

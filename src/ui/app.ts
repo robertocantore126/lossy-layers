@@ -21,6 +21,7 @@ import { el } from './controls';
 import { CrunchPanel } from './crunchPanel';
 import { FilterPanel } from './filterPanel';
 import { LayerPanel } from './layerPanel';
+import { openNewDocument } from './newDocument';
 import { seedDocument } from './seed';
 import { Viewport, type ViewMode, type Zoom } from './viewport';
 
@@ -319,6 +320,17 @@ export class App {
       void this.handleFiles(Array.from(fileInput.files ?? [])).then(() => { fileInput.value = ''; });
     });
 
+    const newBtn = this.barButton('New', () => {
+      openNewDocument((choice) => {
+        this.store.newDocument(choice.width, choice.height, choice.matte, choice.fill);
+        this.history.clear();
+        this.buildToolOptions();
+        this.crunchPanel.render();
+        this.refresh(false);
+        this.status(`New document, ${choice.width} × ${choice.height}.`);
+      });
+    }, 'btn');
+
     const openLabel = el('label', 'btn');
     openLabel.append(
       document.createRange().createContextualFragment(
@@ -344,7 +356,7 @@ export class App {
     const saveBtn = this.barButton('Save project', () => { void this.saveProject(saveBtn); }, 'btn');
     const exportBtn = this.barButton('Export JPEG', () => { void this.exportJpeg(exportBtn); }, 'btn primary');
 
-    bar.append(brand, openLabel, this.historyButtons['undo']!, this.historyButtons['redo']!, saveBtn, exportBtn);
+    bar.append(brand, newBtn, openLabel, this.historyButtons['undo']!, this.historyButtons['redo']!, saveBtn, exportBtn);
 
     // --- tool rail
     const rail = el('aside', 'panel rail');
@@ -493,8 +505,10 @@ export class App {
     });
 
     document.addEventListener('keydown', (e) => {
-      const t = e.target as HTMLElement | null;
-      if (t && t.matches('input, select, textarea')) return;
+      // Not every keydown target is an element: with nothing focused it is
+      // the document, which has no `matches`.
+      const t = e.target;
+      if (t instanceof Element && t.matches('input, select, textarea')) return;
       const k = e.key.toLowerCase();
 
       if (e.ctrlKey || e.metaKey) {

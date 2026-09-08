@@ -134,6 +134,26 @@ The two formats damage each other in a way neither does alone, since JPEG's
 block edges become real detail for WebP to smear and WebP's flat patches give
 JPEG new edges to ring against.
 
+## Documents and what a layer costs
+
+New Document takes pixel dimensions directly, with presets and a background
+choice, and tells you what the size costs: a layer covering a 3000 square
+canvas holds 34 MB. That number is invisible otherwise and it is the one that
+decides whether a large collage stays comfortable.
+
+`MAX_DOC` and `MAX_IMPORT` are separate on purpose. Choosing a big canvas is
+deliberate; dropping a hundred-megapixel photo into a collage usually is not,
+so imports are sampled down and documents are not.
+
+Empty paint layers allocate nothing. `addPaintLayer` makes a one-pixel canvas
+and `Store.materialize` grows it to document size the first time something
+draws on it, which is why five new layers on a 3000 square document cost zero
+rather than 170 MB. Anything that writes pixels must call `materialize`
+first: the paint and gradient tools, the filter preview, and adding a mask.
+Image layers are never materialised, because their canvas is deliberately
+their own natural size, and that is what keeps a collage of small elements
+affordable at high layer counts.
+
 ## Layer masks
 
 A mask is an alpha channel the same size as its layer, held on `Layer.mask`.

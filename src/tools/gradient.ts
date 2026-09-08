@@ -118,6 +118,7 @@ class GradientTool implements Tool {
   onPointerDown(p: StrokeSample, ctx: ToolContext): void {
     const layer = ctx.store.activeLayer();
     if (!layer) return;
+    ctx.store.materialize(layer);
     const surface = ctx.store.surface(layer, ctx.target);
     if (!surface) return;
 

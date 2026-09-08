@@ -129,6 +129,8 @@ class PaintTool implements Tool {
   onPointerDown(p: StrokeSample, ctx: ToolContext): void {
     const layer = ctx.store.activeLayer();
     if (!layer) return;
+    // An empty paint layer holds nothing until the moment it is drawn on.
+    ctx.store.materialize(layer);
     const surface = ctx.store.surface(layer, ctx.target);
     if (!surface) return;
 
