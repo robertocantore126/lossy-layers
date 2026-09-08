@@ -1,4 +1,4 @@
-import { copyCanvas, ctx2d, newCanvas } from '../core/canvas';
+import { ctx2d, newCanvas } from '../core/canvas';
 import { defaultsOf, type ParamValues } from '../core/types';
 import { getCodec, type Codec } from './codecs';
 
@@ -111,7 +111,9 @@ export async function crunch(
 ): Promise<CrunchResult> {
   const t0 = performance.now();
   const codec = getCodec(settings.codecId) ?? getCodec('jpeg');
-  let work = copyCanvas(buildStage(source, settings));
+  // buildStage already hands back a canvas of its own, so there is nothing
+  // here to protect the caller from and nothing to copy.
+  let work = buildStage(source, settings);
   let last: Blob | null = null;
   let bytes = 0;
 

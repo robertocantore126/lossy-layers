@@ -14,6 +14,7 @@ export class Compositor {
   readonly output: HTMLCanvasElement = newCanvas(1, 1);
   private pixelScratch: HTMLCanvasElement = newCanvas(1, 1);
   private maskScratch: HTMLCanvasElement = newCanvas(1, 1);
+  private maskedScratch: HTMLCanvasElement = newCanvas(1, 1);
 
   composite(doc: DocState, overlay: StrokeOverlay | null): HTMLCanvasElement {
     resizeCanvas(this.output, doc.width, doc.height);
@@ -79,12 +80,16 @@ export class Compositor {
 
     // `pixels` may already be pixelScratch, so the masked result needs a
     // surface of its own rather than compositing over the one we read from.
-    const out = newCanvas(l.canvas.width, l.canvas.height);
-    const o = ctx2d(out);
+    // The caller draws it before resolving the next layer, so one reused
+    // scratch is enough and saves a full allocation per masked layer per frame.
+    resizeCanvas(this.maskedScratch, l.canvas.width, l.canvas.height);
+    const o = ctx2d(this.maskedScratch);
+    o.clearRect(0, 0, this.maskedScratch.width, this.maskedScratch.height);
+    o.globalCompositeOperation = 'source-over';
     o.drawImage(pixels, 0, 0);
     o.globalCompositeOperation = 'destination-in';
     o.drawImage(mask, 0, 0);
-    return out;
+    return this.maskedScratch;
   }
 }
 

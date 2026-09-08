@@ -153,6 +153,14 @@ export class App {
    * Overlapping calls collapse into one trailing render.
    */
   private refresh(fast: boolean): void {
+    // The clean view is the surface being drawn on, and compositing is cheap.
+    // It must never wait behind an encode, or a slow method makes the brush
+    // itself feel broken rather than just the preview lagging.
+    const overlay = this.tool.overlay?.() ?? null;
+    const composite = this.compositor.composite(this.store.doc, overlay);
+    this.viewport.showClean(composite);
+    this.stats['layers']!.textContent = String(this.store.layers.length);
+
     if (this.renderBusy) {
       // A pending full render outranks a fast one.
       if (this.renderQueued !== 'full') this.renderQueued = fast ? 'fast' : 'full';
@@ -160,11 +168,6 @@ export class App {
     }
     this.renderBusy = true;
     const seq = ++this.renderSeq;
-
-    const overlay = this.tool.overlay?.() ?? null;
-    const composite = this.compositor.composite(this.store.doc, overlay);
-    this.viewport.showClean(composite);
-    this.stats['layers']!.textContent = String(this.store.layers.length);
 
     if (!this.store.layers.length) {
       this.viewport.clearCompressed();

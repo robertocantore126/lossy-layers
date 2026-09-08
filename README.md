@@ -163,8 +163,15 @@ in disguise: you judged WebP at one hop while it was set to eight, so the
 method looked weaker than it is, and the image visibly changed the moment you
 let go.
 
-`CrunchSettings.livePreview` now decides, and defaults to `full` — show what
-you will actually get. `adaptive` fits as many passes as a 120 ms budget
+The clean view is never gated behind the encode. `refresh` composites and
+paints it before it checks whether a crunch is already running, because that
+is the surface being drawn on and compositing is cheap next to eight WebP
+encodes. Gating it made a slow method feel like a broken brush: measured at
+one clean-canvas update across twenty-seven pointer moves, against every move
+landing immediately now.
+
+`CrunchSettings.livePreview` decides how faithful the compressed pane is, and
+defaults to `full` — show what you will actually get. `adaptive` fits as many passes as a 120 ms budget
 allows, using the measured cost of the last full render. `fast` is the old
 single-pass behaviour, kept for slow machines. The control only appears above
 one pass, where the distinction means something.
