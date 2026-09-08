@@ -4,7 +4,7 @@ import type { BlendMode, DocState, Layer, LayerKind } from '../core/types';
 
 export const PROJECT_EXTENSION = 'lossy.json';
 const FORMAT = 'lossy-layers-project';
-const VERSION = 1;
+const VERSION = 2;
 
 interface SerialLayer {
   id: number;
@@ -20,6 +20,9 @@ interface SerialLayer {
   height: number;
   /** PNG data URL, so alpha survives a round trip. */
   pixels: string;
+  /** Added in format 2. Absent on version 1 files, which had no masks. */
+  mask?: string | null;
+  maskEnabled?: boolean;
 }
 
 interface SerialProject {
@@ -54,6 +57,8 @@ export function serialize(doc: DocState): string {
     width: l.canvas.width,
     height: l.canvas.height,
     pixels: l.canvas.toDataURL('image/png'),
+    mask: l.mask ? l.mask.toDataURL('image/png') : null,
+    maskEnabled: l.maskEnabled,
   }));
 
   const project: SerialProject = {
@@ -102,10 +107,20 @@ export async function deserialize(text: string): Promise<DocState> {
     const img = await loadImage(s.pixels);
     const canvas = newCanvas(s.width || img.naturalWidth, s.height || img.naturalHeight);
     ctx2d(canvas).drawImage(img, 0, 0);
+
+    let mask: HTMLCanvasElement | null = null;
+    if (s.mask) {
+      const mimg = await loadImage(s.mask);
+      mask = newCanvas(canvas.width, canvas.height);
+      ctx2d(mask).drawImage(mimg, 0, 0);
+    }
+
     layers.push({
       id: s.id,
       name: s.name,
       canvas,
+      mask,
+      maskEnabled: s.maskEnabled ?? true,
       x: s.x,
       y: s.y,
       scale: s.scale,

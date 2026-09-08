@@ -1,14 +1,14 @@
 import { ctx2d, resizeCanvas } from '../core/canvas';
-import type { Point } from '../core/types';
+import type { StrokeSample } from '../core/brush';
 import { el } from './controls';
 
 export type ViewMode = 'split' | 'clean' | 'compressed';
 export type Zoom = 'fit' | number;
 
 export interface ViewportHandlers {
-  onDown(p: Point): void;
-  onMove(p: Point): void;
-  onUp(p: Point): void;
+  onDown(p: StrokeSample): void;
+  onMove(p: StrokeSample): void;
+  onUp(p: StrokeSample): void;
 }
 
 /**
@@ -133,15 +133,18 @@ export class Viewport {
   }
 
   /** Pointer position in document space, whichever canvas it came from. */
-  private toDoc(ev: PointerEvent, canvas: HTMLCanvasElement): Point {
+  private toDoc(ev: PointerEvent, canvas: HTMLCanvasElement): StrokeSample {
     const r = canvas.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return { x: 0, y: 0 };
+    // A mouse reports 0.5 while held and 0 otherwise; a stylus reports its own.
+    const pressure = ev.pointerType === 'mouse' || ev.pressure === 0 ? 0.5 : ev.pressure;
+    if (r.width === 0 || r.height === 0) return { x: 0, y: 0, pressure };
     // Both canvases represent the same document, so normalising by the
     // displayed rect and scaling to document size covers the crunch geometry
     // and the zoom in one step.
     return {
       x: ((ev.clientX - r.left) / r.width) * this.docW,
       y: ((ev.clientY - r.top) / r.height) * this.docH,
+      pressure,
     };
   }
 

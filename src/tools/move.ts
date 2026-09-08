@@ -1,3 +1,4 @@
+import type { StrokeSample } from '../core/brush';
 import type { Layer, Point } from '../core/types';
 import { button, hint, row, sign, slider } from '../ui/controls';
 import type { Tool, ToolContext } from './types';
@@ -72,21 +73,21 @@ class MoveTool implements Tool {
     );
   }
 
-  onPointerDown(p: Point, ctx: ToolContext): void {
+  onPointerDown(p: StrokeSample, ctx: ToolContext): void {
     const layer = ctx.store.activeLayer();
     if (!layer) return;
     ctx.history.push();
     this.grab = { layer, start: p, ox: layer.x, oy: layer.y };
   }
 
-  onPointerMove(p: Point, ctx: ToolContext): void {
+  onPointerMove(p: StrokeSample, ctx: ToolContext): void {
     if (!this.grab) return;
     this.grab.layer.x = Math.round(this.grab.ox + (p.x - this.grab.start.x));
     this.grab.layer.y = Math.round(this.grab.oy + (p.y - this.grab.start.y));
     ctx.requestRender(true);
   }
 
-  onPointerUp(_p: Point, ctx: ToolContext): void {
+  onPointerUp(_p: StrokeSample, ctx: ToolContext): void {
     if (!this.grab) return;
     this.grab = null;
     ctx.store.emit();

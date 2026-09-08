@@ -1,9 +1,9 @@
-import { Brush, type BrushSettings } from '../core/brush';
+import { Brush, defaultBrush, type BrushSettings, type StrokeSample } from '../core/brush';
 import { formatBytes } from '../core/canvas';
 import { Compositor } from '../core/compositor';
 import { History } from '../core/history';
 import { Store } from '../core/store';
-import type { Point } from '../core/types';
+import type { EditTarget } from '../core/types';
 import { registerBuiltinFilters } from '../filters/builtin';
 import { allFilters } from '../filters/registry';
 import { acceptFiles, IMAGE_TYPES } from '../io/files';
@@ -13,6 +13,7 @@ import { crunch, defaultCrunch, type CrunchSettings } from '../pipeline/crunch';
 import { registerTool, allTools, getTool, toolForShortcut } from '../tools/registry';
 import { brushTool, eraserTool } from '../tools/paint';
 import { moveTool } from '../tools/move';
+import { gradientTool } from '../tools/gradient';
 import type { Tool, ToolContext } from '../tools/types';
 import { el } from './controls';
 import { CrunchPanel } from './crunchPanel';
@@ -27,7 +28,9 @@ export class App {
   private compositor = new Compositor();
   private brush = new Brush();
 
-  private brushSettings: BrushSettings = { size: 60, hardness: 0.35, opacity: 1, color: '#ffffff' };
+  private brushSettings: BrushSettings = defaultBrush();
+  /** Which surface of the active layer the tools write to. */
+  private editTarget: EditTarget = 'pixels';
   private crunchSettings: CrunchSettings = defaultCrunch();
 
   private tool: Tool;
@@ -52,6 +55,7 @@ export class App {
     registerTool(moveTool);
     registerTool(brushTool);
     registerTool(eraserTool);
+    registerTool(gradientTool);
     this.tool = eraserTool;
 
     this.viewport = new Viewport({
@@ -60,10 +64,16 @@ export class App {
       onUp: (p) => this.dispatch('up', p),
     });
 
-    this.layerPanel = new LayerPanel(this.store, this.history, () => {
-      this.buildToolOptions();
-      this.refresh(false);
-    });
+    this.layerPanel = new LayerPanel(
+      this.store,
+      this.history,
+      () => {
+        this.buildToolOptions();
+        this.refresh(false);
+      },
+      () => this.resolvedTarget(),
+      (t) => { this.editTarget = t; },
+    );
     this.filterPanel = new FilterPanel(this.store, this.history, () => this.refresh(true));
     this.crunchPanel = new CrunchPanel(
       this.crunchSettings,
@@ -89,12 +99,23 @@ export class App {
       history: this.history,
       brush: this.brush,
       brushSettings: this.brushSettings,
+      target: this.resolvedTarget(),
       requestRender: (fast) => this.refresh(fast),
       refreshOptions: () => this.buildToolOptions(),
     };
   }
 
-  private dispatch(phase: 'down' | 'move' | 'up', p: Point): void {
+  /**
+   * The edit target, guarded: a layer with no mask can only be painted on
+   * directly, so the tools never have to check for a missing surface.
+   */
+  private resolvedTarget(): EditTarget {
+    const l = this.store.activeLayer();
+    if (this.editTarget === 'mask' && (!l || !l.mask)) return 'pixels';
+    return this.editTarget;
+  }
+
+  private dispatch(phase: 'down' | 'move' | 'up', p: StrokeSample): void {
     const ctx = this.context();
     if (phase === 'down') this.tool.onPointerDown(p, ctx);
     else if (phase === 'move') this.tool.onPointerMove(p, ctx);

@@ -1,8 +1,8 @@
 import { ctx2d, newCanvas } from '../core/canvas';
 import type { History } from '../core/history';
 import type { Store } from '../core/store';
-import { BLEND_LABELS, BLEND_MODES, type BlendMode, type Layer } from '../core/types';
-import { el, iconButton, selectField, sign, slider } from './controls';
+import { BLEND_LABELS, BLEND_MODES, type BlendMode, type EditTarget, type Layer } from '../core/types';
+import { button, el, iconButton, row, selectField, sign, slider } from './controls';
 
 const EYE_ON =
   '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>';
@@ -47,6 +47,8 @@ export class LayerPanel {
     private store: Store,
     private history: History,
     private onChange: () => void,
+    private getTarget: () => EditTarget,
+    private setTarget: (t: EditTarget) => void,
   ) {
     const head = el('div', 'panel-head');
     head.appendChild(el('span', 'sign', 'Layers'));
@@ -93,6 +95,23 @@ export class LayerPanel {
     return c.toDataURL();
   }
 
+  /**
+   * The mask drawn the way people read masks: white where the layer shows,
+   * black where it is hidden. Internally it is an alpha channel, so this
+   * flattens it onto black to make the alpha visible.
+   */
+  private maskThumbnail(mask: HTMLCanvasElement): string {
+    const c = newCanvas(34, 26);
+    const x = ctx2d(c);
+    x.fillStyle = '#000000';
+    x.fillRect(0, 0, 34, 26);
+    const r = Math.min(34 / mask.width, 26 / mask.height);
+    const w = mask.width * r;
+    const h = mask.height * r;
+    x.drawImage(mask, (34 - w) / 2, (26 - h) / 2, w, h);
+    return c.toDataURL();
+  }
+
   render(): void {
     this.list.textContent = '';
     const layers = this.store.layers;
@@ -135,19 +154,52 @@ export class LayerPanel {
       this.onChange();
     });
 
+    const isActive = l.id === this.store.doc.activeId;
+    const target = this.getTarget();
+
     const thumb = el('img', 'thumb');
     thumb.src = this.thumbnail(l);
-    thumb.alt = '';
+    thumb.alt = 'Layer pixels';
     thumb.draggable = false;
+    thumb.title = 'Edit the layer';
+    if (isActive && l.mask && target === 'pixels') thumb.classList.add('targeted');
+    thumb.addEventListener('pointerdown', (ev) => {
+      if (!l.mask) return;
+      ev.stopPropagation();
+      this.store.select(l.id);
+      this.setTarget('pixels');
+      this.onChange();
+    });
+
+    const thumbs = el('div', 'thumb-pair');
+    thumbs.appendChild(thumb);
+
+    if (l.mask) {
+      const mthumb = el('img', 'thumb mask-thumb');
+      mthumb.src = this.maskThumbnail(l.mask);
+      mthumb.alt = 'Layer mask';
+      mthumb.draggable = false;
+      mthumb.title = l.maskEnabled ? 'Edit the mask' : 'Mask is switched off';
+      if (!l.maskEnabled) mthumb.classList.add('off');
+      if (isActive && target === 'mask') mthumb.classList.add('targeted');
+      mthumb.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation();
+        this.store.select(l.id);
+        this.setTarget('mask');
+        this.onChange();
+      });
+      thumbs.appendChild(mthumb);
+    }
 
     const meta = el('div', 'layer-meta');
     meta.appendChild(el('span', 'layer-name', l.name));
     const bits = [BLEND_LABELS[l.blend]];
     if (l.opacity < 1) bits.push(`${Math.round(l.opacity * 100)}%`);
     if (l.scale !== 1) bits.push(`${Math.round(l.scale * 100)}% scale`);
+    if (l.mask && !l.maskEnabled) bits.push('mask off');
     meta.appendChild(el('span', 'layer-sub', bits.join(' · ')));
 
-    rowEl.append(eye, thumb, meta);
+    rowEl.append(eye, thumbs, meta);
 
     rowEl.addEventListener('pointerdown', (ev) => {
       if ((ev.target as HTMLElement).closest('.eye')) return;
@@ -283,6 +335,67 @@ export class LayerPanel {
         },
       ),
     );
+
+    this.props.appendChild(this.maskControls(l));
+  }
+
+  /**
+   * Mask lifecycle. Adding one is the non-destructive way to blend a collage:
+   * erase on the mask and the pixels underneath are still there to paint back.
+   */
+  private maskControls(l: Layer): HTMLElement {
+    const wrap = el('div', 'field');
+    wrap.appendChild(el('span', 'sign', 'Mask'));
+
+    const act = (fn: () => void) => () => {
+      this.history.push();
+      fn();
+      this.onChange();
+    };
+
+    if (!l.mask) {
+      wrap.appendChild(
+        row(
+          button('Add mask', act(() => {
+            this.store.addMask(l);
+            this.setTarget('mask');
+          }), 'chip accent', 'Erase without deleting anything'),
+        ),
+      );
+      wrap.appendChild(
+        el('p', 'hint', 'A mask hides parts of this layer instead of deleting them, so a blend can always be painted back.'),
+      );
+      return wrap;
+    }
+
+    wrap.appendChild(
+      row(
+        button(l.maskEnabled ? 'Switch off' : 'Switch on', act(() => this.store.toggleMask(l)), 'chip',
+          'Compare the layer with and without its mask'),
+        button('Invert', act(() => this.store.invertMask(l)), 'chip', 'Swap what is hidden for what is shown'),
+        button('Show all', act(() => this.store.fillMask(l, true)), 'chip', 'Reset the mask to fully visible'),
+        button('Hide all', act(() => this.store.fillMask(l, false)), 'chip', 'Hide the layer, then brush it back in'),
+      ),
+    );
+    wrap.appendChild(
+      row(
+        button('Apply', act(() => {
+          this.store.applyMask(l);
+          this.setTarget('pixels');
+        }), 'chip', 'Bake the mask into the pixels and drop it'),
+        button('Delete', act(() => {
+          this.store.removeMask(l);
+          this.setTarget('pixels');
+        }), 'chip', 'Discard the mask and show the whole layer'),
+      ),
+    );
+    wrap.appendChild(
+      el('p', 'hint',
+        this.getTarget() === 'mask'
+          ? 'Editing the mask. The brush reveals, the eraser hides.'
+          : 'Editing the layer. Click its mask thumbnail to paint the blend instead.'),
+    );
+    return wrap;
   }
 
   private syncButtons(): void {

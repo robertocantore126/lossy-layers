@@ -1,4 +1,4 @@
-import type { BlendMode, DocState, Layer, LayerKind } from './types';
+import type { BlendMode, DocState, EditTarget, Layer, LayerKind } from './types';
 import { copyCanvas, ctx2d, fitScale, newCanvas } from './canvas';
 
 /** Longest side we keep at full fidelity. Anything larger is sampled down on import. */
@@ -53,11 +53,29 @@ export class Store {
     layer.canvas = copyCanvas(layer.canvas);
   }
 
+  /** The same copy-on-write rule, for the mask. */
+  detachMask(layer: Layer): void {
+    if (layer.mask) layer.mask = copyCanvas(layer.mask);
+  }
+
+  /** Copy-on-write whichever surface a tool is about to draw into. */
+  detachTarget(layer: Layer, target: EditTarget): void {
+    if (target === 'mask') this.detachMask(layer);
+    else this.detach(layer);
+  }
+
+  /** The canvas a tool should draw into, or null if the mask is missing. */
+  surface(layer: Layer, target: EditTarget): HTMLCanvasElement | null {
+    return target === 'mask' ? layer.mask : layer.canvas;
+  }
+
   makeLayer(canvas: HTMLCanvasElement, name: string, kind: LayerKind = 'paint'): Layer {
     return {
       id: this.nextId++,
       name,
       canvas,
+      mask: null,
+      maskEnabled: true,
       x: 0,
       y: 0,
       scale: 1,
@@ -140,6 +158,8 @@ export class Store {
     d.scale = l.scale;
     d.opacity = l.opacity;
     d.blend = l.blend;
+    d.mask = l.mask ? copyCanvas(l.mask) : null;
+    d.maskEnabled = l.maskEnabled;
     this.doc.layers.splice(this.activeIndex() + 1, 0, d);
     this.doc.activeId = d.id;
     this.emit();
@@ -191,13 +211,83 @@ export class Store {
       c.save();
       c.globalAlpha = l.opacity;
       c.globalCompositeOperation = l.blend;
-      c.drawImage(l.canvas, l.x, l.y, l.canvas.width * l.scale, l.canvas.height * l.scale);
+      // Masks have to be honoured here, or merging would resurrect pixels the
+      // mask was hiding.
+      c.drawImage(this.maskedPixels(l), l.x, l.y, l.canvas.width * l.scale, l.canvas.height * l.scale);
       c.restore();
     }
 
     const out = this.makeLayer(merged, bottom.name, 'paint');
     this.doc.layers.splice(i - 1, 2, out);
     this.doc.activeId = out.id;
+    this.emit();
+  }
+
+  // -------------------------------------------------------------- masks
+
+  /** The layer's pixels with its mask applied, as a standalone canvas. */
+  maskedPixels(l: Layer): HTMLCanvasElement {
+    if (!l.mask || !l.maskEnabled) return l.canvas;
+    const out = copyCanvas(l.canvas);
+    const c = ctx2d(out);
+    c.globalCompositeOperation = 'destination-in';
+    c.drawImage(l.mask, 0, 0);
+    return out;
+  }
+
+  /** A new mask starts fully opaque, so adding one changes nothing on screen. */
+  addMask(l: Layer): void {
+    if (l.mask) return;
+    const m = newCanvas(l.canvas.width, l.canvas.height);
+    const c = ctx2d(m);
+    c.fillStyle = '#ffffff';
+    c.fillRect(0, 0, m.width, m.height);
+    l.mask = m;
+    l.maskEnabled = true;
+    this.emit();
+  }
+
+  removeMask(l: Layer): void {
+    l.mask = null;
+    this.emit();
+  }
+
+  toggleMask(l: Layer): void {
+    l.maskEnabled = !l.maskEnabled;
+    this.emit();
+  }
+
+  /** Swap hidden for shown. The fastest way to flip a blend you painted backwards. */
+  invertMask(l: Layer): void {
+    if (!l.mask) return;
+    this.detachMask(l);
+    const m = l.mask!;
+    const c = ctx2d(m);
+    const img = c.getImageData(0, 0, m.width, m.height);
+    const d = img.data;
+    for (let i = 3; i < d.length; i += 4) d[i] = 255 - d[i]!;
+    c.putImageData(img, 0, 0);
+    this.emit();
+  }
+
+  /** Bake the mask into the pixels and drop it. */
+  applyMask(l: Layer): void {
+    if (!l.mask) return;
+    const flattened = this.maskedPixels(l);
+    l.canvas = flattened === l.canvas ? copyCanvas(l.canvas) : flattened;
+    l.mask = null;
+    this.emit();
+  }
+
+  fillMask(l: Layer, white: boolean): void {
+    if (!l.mask) return;
+    this.detachMask(l);
+    const c = ctx2d(l.mask!);
+    c.save();
+    c.globalCompositeOperation = white ? 'source-over' : 'destination-out';
+    c.fillStyle = '#ffffff';
+    c.fillRect(0, 0, l.mask!.width, l.mask!.height);
+    c.restore();
     this.emit();
   }
 

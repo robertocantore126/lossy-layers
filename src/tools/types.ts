@@ -1,7 +1,7 @@
-import type { Brush, BrushSettings } from '../core/brush';
+import type { Brush, BrushSettings, StrokeSample } from '../core/brush';
 import type { History } from '../core/history';
 import type { Store } from '../core/store';
-import type { Point, StrokeOverlay } from '../core/types';
+import type { EditTarget, StrokeOverlay } from '../core/types';
 
 /** Everything a tool is allowed to reach. Tools never touch the DOM shell. */
 export interface ToolContext {
@@ -9,6 +9,11 @@ export interface ToolContext {
   history: History;
   brush: Brush;
   brushSettings: BrushSettings;
+  /**
+   * Which surface of the active layer the tools write to. Already resolved:
+   * it is never 'mask' unless the active layer actually has one.
+   */
+  target: EditTarget;
   /** `fast` renders a single compression pass so dragging stays responsive. */
   requestRender(fast: boolean): void;
   /** Rebuild the tool's own options panel, after a tool changes its settings. */
@@ -33,9 +38,9 @@ export interface Tool {
   /** Build the options panel. Called whenever the tool or selection changes. */
   buildOptions(host: HTMLElement, ctx: ToolContext): void;
 
-  onPointerDown(p: Point, ctx: ToolContext): void;
-  onPointerMove(p: Point, ctx: ToolContext): void;
-  onPointerUp(p: Point, ctx: ToolContext): void;
+  onPointerDown(p: StrokeSample, ctx: ToolContext): void;
+  onPointerMove(p: StrokeSample, ctx: ToolContext): void;
+  onPointerUp(p: StrokeSample, ctx: ToolContext): void;
 
   /** The in-progress stroke, if this tool has one to show. */
   overlay?(): StrokeOverlay | null;

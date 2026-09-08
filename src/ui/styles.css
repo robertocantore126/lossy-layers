@@ -271,11 +271,17 @@ select {
   background: none; border: none; cursor: pointer; color: var(--ink-faint);
 }
 .layer .eye svg { width: 13px; height: 13px; }
+.thumb-pair { display: flex; gap: 3px; flex: none; }
 .layer .thumb {
   width: 34px; height: 26px; flex: none;
   border: 1px solid var(--line); border-radius: 2px;
   background: #0c0e11; object-fit: contain;
 }
+/* Which surface the tools will write to. Only shown once a mask exists,
+   because with no mask there is nothing to choose between. */
+.layer .thumb.targeted { outline: 2px solid var(--accent); outline-offset: 1px; }
+.layer .mask-thumb { cursor: pointer; }
+.layer .mask-thumb.off { opacity: .4; border-style: dashed; }
 .layer-meta { min-width: 0; display: flex; flex-direction: column; }
 .layer-name { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-sub { font-size: 9.5px; color: var(--ink-faint); }

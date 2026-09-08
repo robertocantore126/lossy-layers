@@ -40,11 +40,25 @@ export const BLEND_LABELS: Record<BlendMode, string> = {
 
 export type LayerKind = 'image' | 'paint';
 
+/** Which surface of a layer the tools write to. */
+export type EditTarget = 'pixels' | 'mask';
+
 export interface Layer {
   id: number;
   name: string;
   /** The layer's own pixels, at its own natural size. */
   canvas: HTMLCanvasElement;
+  /**
+   * Optional alpha mask, same size as `canvas`.
+   *
+   * Stored as an alpha channel rather than greyscale: opaque means the layer
+   * shows, transparent means it is hidden, and the compositor applies it with
+   * one `destination-in`. Painting the mask never touches the layer's own
+   * pixels, which is the whole point of blending a collage this way.
+   */
+  mask: HTMLCanvasElement | null;
+  /** A mask can be held without being applied, so you can compare. */
+  maskEnabled: boolean;
   /** Placement in document space. */
   x: number;
   y: number;
@@ -78,7 +92,9 @@ export interface Point {
 export interface StrokeOverlay {
   layerId: number;
   buffer: HTMLCanvasElement;
-  /** How the buffer merges into its layer. */
+  /** Whether the stroke lands on the layer's pixels or on its mask. */
+  target: EditTarget;
+  /** How the buffer merges into that surface. */
   mode: GlobalCompositeOperation;
   alpha: number;
 }

@@ -92,6 +92,26 @@ const invert: Filter = {
 A filter takes a canvas and returns a canvas. It never sees the layer stack,
 the store or the DOM.
 
+## Layer masks
+
+A mask is an alpha channel the same size as its layer, held on `Layer.mask`.
+The compositor applies it with one `destination-in`, so the layer shows only
+where the mask is opaque and its own pixels are never modified.
+
+This is what makes collage blending work. Erase on a mask and the image is
+hidden, not deleted, so you can brush it straight back. The brush reveals and
+the eraser hides, which spares anyone having to remember whether black or
+white is the hiding colour.
+
+`Store` owns the lifecycle: `addMask`, `removeMask`, `toggleMask`,
+`invertMask`, `fillMask` and `applyMask`, plus `maskedPixels` for anywhere
+that needs a layer already flattened against its mask. `mergeDown` uses that
+last one, or merging would resurrect pixels the mask was hiding.
+
+Tools write to whichever surface is selected. `ToolContext.target` is already
+resolved, so a tool never has to check whether a mask exists, and
+`Store.detachTarget` applies the copy-on-write rule to the right canvas.
+
 ## Two things worth knowing before changing them
 
 **Undo is copy-on-write.** `History.push` snapshots the layer array with the
@@ -114,6 +134,9 @@ PNG because layers carry alpha and a lossy intermediate would degrade the
 document every time it was reopened. Files are therefore large; that is the
 right trade for a source document. The reader checks a format tag and a
 version and refuses anything newer than it understands.
+
+Format 2 added masks. Version 1 files still load: they simply have no mask,
+which `deserialize` treats as `null`.
 
 ## Licence
 
