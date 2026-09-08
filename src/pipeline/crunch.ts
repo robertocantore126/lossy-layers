@@ -108,7 +108,7 @@ export async function crunch(
 
   for (let i = 0; i < passes; i++) {
     if (cancelled()) break;
-    const pass = await codec.run(work, values);
+    const pass = await codec.run(work, values, { index: i, total: passes });
     if (cancelled()) break;
     if (pass.blob.size > 0) {
       last = pass.blob;

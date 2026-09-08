@@ -319,6 +319,73 @@ const chroma: Codec = {
   },
 };
 
+/* ------------------------------------------------------------ repost chain */
+
+/**
+ * An image passed between platforms, not one encoder run repeatedly.
+ *
+ * This is what actually happened to old internet images: saved as JPEG,
+ * uploaded somewhere that re-encoded to WebP, saved again, resized by
+ * whatever it landed on next, reposted. Each hop compresses the previous
+ * hop's artifacts in a different format, and the two damage each other in a
+ * way neither does alone. JPEG's block edges become real detail that WebP
+ * then smears; WebP's flat patches give JPEG new edges to ring against.
+ *
+ * `passes` is the number of hops. Everything here needs the pass index,
+ * which is why codecs get one.
+ */
+const repost: Codec = {
+  id: 'repost',
+  label: 'Repost chain',
+  character: 'JPEG and WebP alternating, each hop a little worse. The look of an image saved and reuploaded too many times.',
+  params: [
+    { kind: 'range', key: 'jpegQuality', label: 'JPEG hops', min: 1, max: 100, default: 45 },
+    { kind: 'range', key: 'webpQuality', label: 'WebP hops', min: 1, max: 100, default: 40 },
+    { kind: 'range', key: 'decay', label: 'Quality lost per hop', min: 0, max: 12, default: 3 },
+    { kind: 'range', key: 'resample', label: 'Resize per hop', min: 0, max: 60, default: 0, unit: '%' },
+    {
+      kind: 'choice',
+      key: 'start',
+      label: 'First hop',
+      options: [
+        { value: 'jpeg', label: 'JPEG first' },
+        { value: 'webp', label: 'WebP first' },
+      ],
+      default: 'jpeg',
+    },
+  ],
+  async run(source, v, pass) {
+    const startsJpeg = (v['start'] ?? 'jpeg') !== 'webp';
+    const jpegFirst = pass.index % 2 === 0 ? startsJpeg : !startsJpeg;
+    const mime = jpegFirst || !canEncode('image/webp') ? 'image/jpeg' : 'image/webp';
+
+    const base = num(v, jpegFirst ? 'jpegQuality' : 'webpQuality', 40);
+    // Every hop starts from an already-degraded copy, so the chain gets worse
+    // even before the encoder settings do.
+    const quality = clamp(base - num(v, 'decay', 3) * pass.index, 1, 100) / 100;
+
+    let staged = source;
+    const shrink = num(v, 'resample', 0) / 100;
+    if (shrink > 0) {
+      // Platforms resize, and the image gets viewed back at full size. The
+      // round trip costs real detail on top of whatever the encoder takes.
+      const w = Math.max(1, Math.round(source.width * (1 - shrink)));
+      const h = Math.max(1, Math.round(source.height * (1 - shrink)));
+      const small = newCanvas(w, h);
+      const sc = ctx2d(small);
+      sc.imageSmoothingQuality = 'high';
+      sc.drawImage(source, 0, 0, w, h);
+
+      staged = newCanvas(source.width, source.height);
+      const bc = ctx2d(staged);
+      bc.imageSmoothingQuality = 'high';
+      bc.drawImage(small, 0, 0, source.width, source.height);
+    }
+
+    return throughFormat(staged, mime, quality);
+  },
+};
+
 export function registerBuiltinCodecs(): void {
   registerCodec(jpeg);
   // Only offer a format this browser can really encode. A silent PNG
@@ -326,4 +393,6 @@ export function registerBuiltinCodecs(): void {
   if (canEncode('image/webp')) registerCodec(webp);
   registerCodec(indexed);
   registerCodec(chroma);
+  // Needs both formats to alternate; with one it would just be that one.
+  if (canEncode('image/webp')) registerCodec(repost);
 }

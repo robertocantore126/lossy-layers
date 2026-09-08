@@ -123,6 +123,16 @@ Two rules keep the byte counts honest, and both exist because of a real trap:
 | WebP | Smears instead of blocking; flat waxy patches, fine texture gone |
 | Indexed colour | Median-cut palette taken from the image, with optional dithering |
 | Chroma crush | Keeps luma at full resolution and guts the colour difference channels |
+| Repost chain | JPEG and WebP alternating, each hop worse than the last |
+
+Repost chain is the reason `Codec.run` receives a `PassContext`. Most methods
+ignore it and behave identically every time, because they model one encoder
+applied repeatedly. That one models an image passed between platforms, so
+each hop has to know where it sits: which format this round uses, how much
+quality has been lost getting here, and whether to resize on the way through.
+The two formats damage each other in a way neither does alone, since JPEG's
+block edges become real detail for WebP to smear and WebP's flat patches give
+JPEG new edges to ring against.
 
 ## Layer masks
 

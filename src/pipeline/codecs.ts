@@ -16,12 +16,24 @@ export interface CodecPass {
   reportedBytes?: number;
 }
 
+/** Where in the chain a pass sits, for methods that vary as they repeat. */
+export interface PassContext {
+  /** 0-based index of this pass. */
+  index: number;
+  /** How many passes are being run in total. */
+  total: number;
+}
+
 /**
  * A compression method.
  *
  * `run` is one pass: degrade the pixels the way this method does, and report
  * the byte count honestly. Feeding its own output back in is what produces
  * generation loss, so a codec must be able to consume what it produces.
+ *
+ * Most codecs ignore `pass` and behave identically every time. A method that
+ * models something happening repeatedly over time, rather than one encoder
+ * applied again, uses it to change what each round does.
  */
 export interface Codec {
   readonly id: string;
@@ -29,7 +41,7 @@ export interface Codec {
   /** One line on what the damage looks like. Shown under the picker. */
   readonly character: string;
   readonly params: readonly ParamSpec[];
-  run(source: HTMLCanvasElement, values: ParamValues): Promise<CodecPass>;
+  run(source: HTMLCanvasElement, values: ParamValues, pass: PassContext): Promise<CodecPass>;
 }
 
 const codecs: Codec[] = [];
